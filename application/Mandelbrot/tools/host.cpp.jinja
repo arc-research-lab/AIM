@@ -1,0 +1,192 @@
+#include "./aie_graph.h"
+#include "./config.h"
+
+#define DATA_SIZE (INPUT_BITS/32)
+#define N_ITER 1
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <fstream>
+
+#define AP_INT_MAX_W 16384
+#include <ap_int.h>
+
+// This is used for the PL Kernels
+#include "xrt/xrt.h"
+#include "xrt/experimental/xrt_kernel.h"
+
+// Using the ADF API that call XRT API
+#include "adf/adf_api/XRTConfig.h"
+simpleGraph addergraph;
+
+static std::vector<char> load_xclbin(xrtDeviceHandle device, const std::string& fnm) {
+    if (fnm.empty()) throw std::runtime_error("No xclbin specified");
+
+    std::ifstream stream(fnm);
+    stream.seekg(0, stream.end);
+    size_t size = stream.tellg();
+    stream.seekg(0, stream.beg);
+
+    std::vector<char> header(size);
+    stream.read(header.data(), size);
+
+    auto top = reinterpret_cast<const axlf*>(header.data());
+    if (xrtDeviceLoadXclbin(device, top)) throw std::runtime_error("Xclbin loading failed");
+
+    return header;
+}
+
+template<int size>
+void sw_cmp(unsigned int *in0, unsigned int *in1, unsigned int *out){
+    ap_uint<size * 2 * 32> a0 = 0;
+    ap_uint<size * 2 * 32> b0 = 0;
+    for(int i = 0; i < size; ++i){
+        a0((i + 1) * 32 - 1, i * 32) = in0[i];
+        b0((i + 1) * 32 - 1, i * 32) = in1[i];
+    }
+    ap_uint<size * 2 * 32> c0 = a0 * b0;
+    for(int i = 0; i < size * 2; ++i){
+        out[i] = c0((i + 1) * 32 - 1, i * 32);
+    }
+}
+
+int main(int argc, char** argv) {
+
+    int repeat = 1;
+    int enable_vrf = 1;
+    bool block_ddr = false;
+    uint32_t batch = BATCH;
+
+    if(argc == 6){
+        batch = atoi(argv[2]);
+        repeat = atoi(argv[3]);
+        enable_vrf = atoi(argv[4]); 
+        block_ddr = atoi(argv[5]) == 1 ? true : false;
+    }
+    
+
+    std::cout << "repeat " << repeat << " times" << std::endl;
+    std::cout << "batch " << batch << std::endl;
+    std::cout << "software verify?  " << (enable_vrf == 1 ? "yes" : "no") << std::endl;
+    std::cout << "remove ddr?  " << (block_ddr ? "yes" : "no") << std::endl;
+
+    //////////////////////////////////////////
+    // Open xclbin
+    //////////////////////////////////////////
+    auto dhdl = xrtDeviceOpen(0); // Open Device the local device
+    if (dhdl == nullptr) throw std::runtime_error("No valid device handle found. Make sure using right xclOpen index.");
+    auto xclbin = load_xclbin(dhdl, "krnl_adder.xclbin");
+    auto top = reinterpret_cast<const axlf*>(xclbin.data());
+    adf::registerXRT(dhdl, top->m_header.uuid);
+    srand(time(0));
+    const int sizeIn = DATA_SIZE;
+    const int sizeOut = DATA_SIZE * 2;
+
+{% for i in range(PE) %}
+    unsigned int *DataInput_{{i}}_0 = (unsigned int *) malloc(AIE_NUM * batch * DATA_SIZE * sizeof(int)); // [AIE_NUM][BATCH][DATA_SIZE];
+    unsigned int *DataInput_{{i}}_1 = (unsigned int *) malloc(AIE_NUM * batch * DATA_SIZE * sizeof(int)); // [AIE_NUM][BATCH][DATA_SIZE];
+    unsigned int *golden_{{i}} = (unsigned int *) malloc(AIE_NUM * batch * DATA_SIZE * sizeof(int) * 2); // [AIE_NUM][BATCH][DATA_SIZE * 2];
+    
+    
+
+    for(uint32_t i = 0; i < AIE_NUM; ++i){
+        for(uint32_t j = 0; j < batch; ++j){
+            for(uint32_t k = 0; k < DATA_SIZE; ++k){
+                DataInput_{{i}}_0[i * batch * DATA_SIZE + j * DATA_SIZE + k] = rand();
+                DataInput_{{i}}_1[i * batch * DATA_SIZE + j * DATA_SIZE + k] = rand();
+            }
+            if(enable_vrf == 1){
+                sw_cmp<DATA_SIZE>(DataInput_{{i}}_0 + (i * batch * DATA_SIZE + j * DATA_SIZE), DataInput_{{i}}_1 + (i * batch * DATA_SIZE + j * DATA_SIZE), golden_{{i}} + (i * batch * DATA_SIZE + j * DATA_SIZE) * 2);
+            }
+        }
+    }
+{% endfor %}
+
+{% for i in range(PE) %}
+
+    xrtBufferHandle in_bohdl_{{i}}_0 = xrtBOAlloc(dhdl, (AIE_NUM * batch * DATA_SIZE) * sizeof(int), 0, 0);
+    auto in_bomapped_{{i}}_0 = reinterpret_cast<uint32_t*>(xrtBOMap(in_bohdl_{{i}}_0));
+    memcpy(in_bomapped_{{i}}_0, DataInput_{{i}}_0, (AIE_NUM * batch * DATA_SIZE) * sizeof(int));
+
+    xrtBufferHandle in_bohdl_{{i}}_1 = xrtBOAlloc(dhdl, (AIE_NUM * batch * DATA_SIZE) * sizeof(int), 0, 0);
+    auto in_bomapped_{{i}}_1 = reinterpret_cast<uint32_t*>(xrtBOMap(in_bohdl_{{i}}_1));
+    memcpy(in_bomapped_{{i}}_1, DataInput_{{i}}_1, (AIE_NUM * batch * DATA_SIZE) * sizeof(int));
+
+
+    xrtBufferHandle out_bohdl_{{i}} = xrtBOAlloc(dhdl, (AIE_NUM * batch * DATA_SIZE * 2) * sizeof(int), 0, 0);
+    auto out_bomapped_{{i}} = reinterpret_cast<uint32_t*>(xrtBOMap(out_bohdl_{{i}}));
+    memset(out_bomapped_{{i}}, 0xABCDEF00, (AIE_NUM * batch * DATA_SIZE * 2) * sizeof(int));
+
+    xrtKernelHandle pl_kernel_khdl1_{{i}} = xrtPLKernelOpen(dhdl, top->m_header.uuid, "pl_kernel:{pl_kernel_{{i}}}");
+
+{% endfor %}
+
+    printf("graph init. This does nothing because CDO in boot PDI already configures AIE.\n");
+    addergraph.init();
+
+    printf("graph run\n");
+    addergraph.run(-1);
+
+    double kernel_time_in_sec = 0;
+    std::chrono::duration<double> kernel_time(0);
+    auto kernel_start = std::chrono::high_resolution_clock::now();
+
+{% for i in range(PE) %}
+    xrtRunHandle pl_kernel_rhdl1_{{i}} = xrtKernelRun(pl_kernel_khdl1_{{i}}, in_bohdl_{{i}}_0, in_bohdl_{{i}}_1, out_bohdl_{{i}}, batch, repeat, block_ddr{% for j in range(PLIO_PORTS*3) %}, nullptr{%endfor%});
+{% endfor %}
+
+{% for i in range(PE) %}
+    auto state_{{i}} = xrtRunWait(pl_kernel_rhdl1_{{i}});
+    std::cout << "pl_kernel_khdl1_{{i}} completed with status(" << state_{{i}} << ")\n";
+    xrtRunClose(pl_kernel_rhdl1_{{i}});
+    xrtKernelClose(pl_kernel_khdl1_{{i}});
+{% endfor %}
+
+    auto kernel_end = std::chrono::high_resolution_clock::now();
+    kernel_time = std::chrono::duration<double>(kernel_end - kernel_start);
+    kernel_time_in_sec = kernel_time.count();
+
+    int errorCount = 0;
+    if(enable_vrf == 1)
+    {
+{% for i in range(PE) %}
+        for(uint32_t i = 0; i < AIE_NUM; ++i){
+            for(uint32_t j = 0; j < batch; ++j){
+                for(uint32_t k = 0; k < DATA_SIZE * 2; ++k){
+                    if(golden_{{i}}[i * batch * DATA_SIZE * 2 + j * DATA_SIZE * 2 + k] != out_bomapped_{{i}}[i * batch * DATA_SIZE * 2 + j * DATA_SIZE * 2 + k]){
+                        printf("Miss match found @ task(%d) batch(%d) - %d, %d != %d\n", i, j, k, out_bomapped_{{i}}[i * batch * DATA_SIZE * 2 + j * DATA_SIZE * 2 + k], golden_{{i}}[i * batch * DATA_SIZE * 2 + j * DATA_SIZE * 2 + k]);
+                        errorCount++;
+                    }
+                }
+            }
+        }
+{% endfor %}
+        if (errorCount)
+            printf("Test(%d) failed with %d errors\n", AIE_NUM * batch * DATA_SIZE * 2, errorCount);
+        else
+            printf("TEST PASSED!!\n");
+    }
+
+    std::ofstream ofs;
+    ofs.open("res.log");
+    ofs << INPUT_BITS << "-bits, " << "BATCH:" << batch << ", #AIE:" << AIE_NUM << std::endl;
+    ofs << kernel_time_in_sec << " sec" << std::endl;
+    ofs.close();
+
+    //////////////////////////////////////////
+    // clean up XRT
+    //////////////////////////////////////////
+
+    std::cout << "Releasing remaining XRT objects...\n";
+{% for i in range(PE) %}
+    xrtBOFree(in_bohdl_{{i}}_0);
+    xrtBOFree(in_bohdl_{{i}}_1);
+    xrtBOFree(out_bohdl_{{i}});
+{% endfor %}
+    xrtDeviceClose(dhdl);
+    std::cout << "finish in " << kernel_time_in_sec << " sec\n";
+    
+    return errorCount;
+
+}

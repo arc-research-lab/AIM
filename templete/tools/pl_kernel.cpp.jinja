@@ -1,0 +1,462 @@
+#include <ap_int.h>
+#include <hls_stream.h>
+#include <ap_axi_sdata.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <math.h>
+#include "config.h"
+
+void merge_phase2(hls::stream<ap_uint<DDR_BITS>> &final_merge_out, hls::stream<ap_uint<DDR_BITS>> &serialize_out, const uint32_t batch, const uint32_t repeat){
+    // generate
+    uint16_t shift[64] = { {{shift2}} };
+    for(uint32_t rep = 0; rep < repeat; ++rep){
+#pragma HLS loop_tripcount min=1 max=1 avg=1
+        for(uint32_t j = 0; j < batch; ++j){
+#pragma HLS loop_tripcount min=1 max=1 avg=1
+            ap_uint<DDR_BITS * 2> fifo = 0;
+            ap_uint<DDR_BITS> carry = 0;
+            uint16_t idx = 0;
+            int remains = 0;
+            uint32_t output_idx = 0;
+            ap_uint<DDR_BITS * 2> last = 0;
+            for(uint32_t k = 0; k < OUTPUT_AIE; ++k){
+                for(uint32_t t = 0; t < AIE_OUTPUT_CHUNK; ++t){
+#pragma HLS pipeline II = 1
+                    if(t < AIE_OUTPUT_CHUNK - 2){
+                        ap_uint<DDR_BITS * 2> tmp = 0;
+                        tmp(DDR_BITS - 1, 0) = serialize_out.read();
+                        tmp += carry;
+                        // fifo(remains + DDR_BITS - 1, remains) = tmp(DDR_BITS - 1, 0);
+                        fifo += tmp << shift[idx];
+                        carry = tmp(2 * DDR_BITS - 1, DDR_BITS);
+                        if(output_idx < TASK_OUTPUT_CHUNK){
+                            final_merge_out << fifo(DDR_BITS - 1, 0);
+                            output_idx++;
+                        }
+                        fifo = (fifo >> DDR_BITS);
+                    }else if(t == AIE_OUTPUT_CHUNK - 2){
+                        last = 0;
+                        last(DDR_BITS - 1, 0) = serialize_out.read();
+                        last += carry;
+                    }else if(t == AIE_OUTPUT_CHUNK - 1){
+                        carry = serialize_out.read(); 
+                        carry += last(LAST_VALID + DDR_BITS - 1, LAST_VALID);
+                        // fifo(remains + LAST_VALID - 1, remains) = last(LAST_VALID - 1, 0);
+                        fifo += last << shift[idx];
+                        idx = (idx == 63 ? 0 : idx + 1);
+                        remains += LAST_VALID;
+                        if(remains >= DDR_BITS && output_idx < TASK_OUTPUT_CHUNK){
+                            final_merge_out << fifo(DDR_BITS - 1, 0);
+                            output_idx++;
+                            remains -= DDR_BITS;
+                            fifo = fifo >> DDR_BITS;
+                        }
+                    }
+                }
+            }
+            if(output_idx < TASK_OUTPUT_CHUNK){
+#pragma HLS loop_tripcount min=1 max=1 avg=1
+                final_merge_out << fifo(DDR_BITS - 1, 0);
+            }
+        }
+    }
+}
+
+void reorganize_a(hls::stream<ap_uint<PLIO_BITS> > &reorg_s, hls::stream<ap_uint<DDR_BITS> > &raw_data_s, const int batch, const uint32_t repeat){
+    uint16_t shift[31] = {0, 16, 32, 48, 64, 80, 96, 112, 4, 20, 36, 52, 68, 84, 100, 116, 8, 24, 40, 56, 72, 88, 104, 120, 12, 28, 44, 60, 76, 92, 108};
+    for(uint32_t rep = 0; rep < repeat; ++rep){
+#pragma HLS loop_tripcount min=1 max=1 avg=1
+        for(uint32_t bch = 0; bch < batch; ++bch){
+#pragma HLS loop_tripcount min=1 max=1 avg=1
+            uint16_t idx = 0;
+            ap_uint<DDR_BITS + PLIO_BITS> fifo = 0;
+            int remains = 0;
+            uint32_t sent = 0;
+            for(uint32_t i = 0; i < TASK_INPUT_CHUNK; ++i){
+                for(uint32_t j = 0; j < 5; ++j){
+#pragma HLS pipeline II = 1
+                    if(j == 0){
+                        ap_uint<DDR_BITS + PLIO_BITS> fifo_tmp = 0;
+                        fifo_tmp(DDR_BITS - 1, 0) = raw_data_s.read();
+                        fifo += fifo_tmp << shift[idx];
+                        idx = (idx == 30 ? 0 : idx + 1);
+                        // fifo(remains + DDR_BITS - 1, remains) = raw_data_s.read(); // buf[batch][i];
+                        remains += DDR_BITS;
+                    }
+                    if(remains >= (PLIO_BITS / VEC_ELEM_BITS) * VALID_BITS && sent < SENT_VALID){
+                        ap_uint<PLIO_BITS> tmp = 0;
+                        for(uint32_t k = 0; k < (PLIO_BITS / VEC_ELEM_BITS); ++k){
+                            tmp(k * VEC_ELEM_BITS + VALID_BITS - 1, k * VEC_ELEM_BITS) = fifo(k * VALID_BITS + VALID_BITS - 1, k * VALID_BITS);
+                        }
+                        sent++;
+                        fifo = fifo >> ((PLIO_BITS / VEC_ELEM_BITS) * VALID_BITS);
+                        remains -= (PLIO_BITS / VEC_ELEM_BITS) * VALID_BITS;
+                        reorg_s << tmp;
+                    }
+                }
+            }
+
+            for(uint32_t i = 0; i < TAILS_A / (PLIO_BITS / VEC_ELEM_BITS); ++i){
+        #pragma HLS pipeline II = 1
+                ap_uint<PLIO_BITS> tmp = 0;
+                for(uint32_t k = 0; k < (PLIO_BITS / VEC_ELEM_BITS); ++k){
+                    tmp(k * VEC_ELEM_BITS + VALID_BITS - 1, k * VEC_ELEM_BITS) = fifo(k * VALID_BITS + VALID_BITS - 1, k * VALID_BITS);
+                }
+                fifo = fifo >> ((PLIO_BITS / VEC_ELEM_BITS) * VALID_BITS);
+                reorg_s << tmp;
+            }
+        }
+    }
+}
+
+void reorganize_b(hls::stream<ap_uint<PLIO_BITS> > &reorg_s, hls::stream<ap_uint<DDR_BITS> > &raw_data_s, const int batch, const uint32_t repeat){
+    uint16_t shift[31] = {0, 16, 32, 48, 64, 80, 96, 112, 4, 20, 36, 52, 68, 84, 100, 116, 8, 24, 40, 56, 72, 88, 104, 120, 12, 28, 44, 60, 76, 92, 108};
+    for(uint32_t rep = 0; rep < repeat; ++rep){
+#pragma HLS loop_tripcount min=1 max=1 avg=1
+        for(uint32_t bch = 0; bch < batch; ++bch){
+#pragma HLS loop_tripcount min=1 max=1 avg=1
+            uint16_t idx = 0;
+            for(uint32_t i = 0; i < AIE_H / (PLIO_BITS / VEC_ELEM_BITS); ++i){
+#pragma HLS pipeline II = 1
+                ap_uint<PLIO_BITS> tmp = 0;
+                reorg_s << tmp;
+            }
+            ap_uint<DDR_BITS + PLIO_BITS> fifo = 0;
+            int remains = 0;
+            uint32_t sent = 0;
+            for(uint32_t i = 0; i < TASK_INPUT_CHUNK; ++i){
+                for(uint32_t j = 0; j < 5; ++j){
+#pragma HLS pipeline II = 1
+                    if(j == 0){
+                        ap_uint<DDR_BITS + PLIO_BITS> fifo_tmp = 0;
+                        fifo_tmp(DDR_BITS - 1, 0) = raw_data_s.read();
+                        fifo += fifo_tmp << shift[idx];
+                        idx = (idx == 30 ? 0 : idx + 1);
+                        // fifo(remains + DDR_BITS - 1, remains) = raw_data_s.read(); // buf[batch][i];
+                        remains += DDR_BITS;
+                    }
+                    if(remains >= (PLIO_BITS / VEC_ELEM_BITS) * VALID_BITS && sent < SENT_VALID){
+                        ap_uint<PLIO_BITS> tmp = 0;
+                        for(uint32_t k = 0; k < (PLIO_BITS / VEC_ELEM_BITS); ++k){
+                            tmp(k * VEC_ELEM_BITS + VALID_BITS - 1, k * VEC_ELEM_BITS) = fifo(k * VALID_BITS + VALID_BITS - 1, k * VALID_BITS);
+                        }
+                        sent++;
+                        fifo = fifo >> ((PLIO_BITS / VEC_ELEM_BITS) * VALID_BITS);
+                        remains -= (PLIO_BITS / VEC_ELEM_BITS) * VALID_BITS;
+                        reorg_s << tmp;
+                    }
+                }
+            }
+
+            for(uint32_t i = 0; i < TAILS_B / (PLIO_BITS / VEC_ELEM_BITS); ++i){
+#pragma HLS pipeline II = 1
+                ap_uint<PLIO_BITS> tmp = 0;
+                for(uint32_t k = 0; k < (PLIO_BITS / VEC_ELEM_BITS); ++k){
+                    tmp(k * VEC_ELEM_BITS + VALID_BITS - 1, k * VEC_ELEM_BITS) = fifo(k * VALID_BITS + VALID_BITS - 1, k * VALID_BITS);
+                }
+                fifo = fifo >> ((PLIO_BITS / VEC_ELEM_BITS) * VALID_BITS);
+                reorg_s << tmp;
+            }
+        }
+    }
+}
+
+
+
+void receive_plio(hls::stream<ap_uint<DDR_BITS>> &merge0_out, hls::stream<qdma_axis<PLIO_BITS, 0, 0, 0> > &plio, const uint32_t batch, const uint32_t repeat, const bool block_aie){
+    uint16_t shift[64] = {0, 248, 496, 232, 480, 216, 464, 200, 448, 184, 432, 168, 416, 152, 400, 136, 384, 120, 368, 104, 352, 88, 336, 72, 320, 56, 304, 40, 288, 24, 272, 8, 256, 504, 240, 488, 224, 472, 208, 456, 192, 440, 176, 424, 160, 408, 144, 392, 128, 376, 112, 360, 96, 344, 80, 328, 64, 312, 48, 296, 32, 280, 16, 264};
+    
+    for(uint32_t rep = 0; rep < repeat; ++rep){
+#pragma HLS loop_tripcount min=1 max=1 avg=1
+        for(uint32_t bch = 0; bch < batch; ++bch){
+#pragma HLS loop_tripcount min=1 max=1 avg=1
+            uint16_t idx = 0;
+            ap_uint<2 * VALID_BITS> carry = 0;
+            ap_uint<DDR_BITS + VEC_SIZE * VALID_BITS> fifo = 0;
+            int remains = 0;
+            uint32_t output_idx = 0;
+            for(uint32_t j = 0; j < AIE_W / VEC_SIZE; ++j){
+                ap_uint<VALID_BITS * VEC_SIZE + 2 * VALID_BITS> res = 0;
+                for(uint32_t v = 0; v < 3; ++v){
+#pragma HLS pipeline II = 2
+                    ap_uint<VALID_BITS * VEC_SIZE + 2 * VALID_BITS> p_vec = 0;
+                    if(v == 0){
+                        res += carry;
+                    }
+                    qdma_axis<PLIO_BITS, 0, 0, 0> tmp0;
+                    qdma_axis<PLIO_BITS, 0, 0, 0> tmp1;
+                    tmp0 = plio.read();
+                    tmp1 = plio.read();
+                    const uint32_t idx0 = 0 * (PLIO_BITS / VEC_ELEM_BITS) + 0;
+                    p_vec((idx0 + 1) * VALID_BITS - 1, idx0 * VALID_BITS) = tmp0.data(0 * VEC_ELEM_BITS + VALID_BITS - 1, 0 * VEC_ELEM_BITS);
+
+                    const uint32_t idx1 = 0 * (PLIO_BITS / VEC_ELEM_BITS) + 1;
+                    p_vec((idx1 + 1) * VALID_BITS - 1, idx1 * VALID_BITS) = tmp0.data(1 * VEC_ELEM_BITS + VALID_BITS - 1, 1 * VEC_ELEM_BITS);
+
+                    const uint32_t idx2 = 0 * (PLIO_BITS / VEC_ELEM_BITS) + 2;
+                    p_vec((idx2 + 1) * VALID_BITS - 1, idx2 * VALID_BITS) = tmp0.data(2 * VEC_ELEM_BITS + VALID_BITS - 1, 2 * VEC_ELEM_BITS);
+
+                    const uint32_t idx3 = 0 * (PLIO_BITS / VEC_ELEM_BITS) + 3;
+                    p_vec((idx3 + 1) * VALID_BITS - 1, idx3 * VALID_BITS) = tmp0.data(3 * VEC_ELEM_BITS + VALID_BITS - 1, 3 * VEC_ELEM_BITS);
+
+                    const uint32_t idx4 = 1 * (PLIO_BITS / VEC_ELEM_BITS) + 0;
+                    p_vec((idx4 + 1) * VALID_BITS - 1, idx4 * VALID_BITS) = tmp1.data(0 * VEC_ELEM_BITS + VALID_BITS - 1, 0 * VEC_ELEM_BITS);
+
+                    const uint32_t idx5 = 1 * (PLIO_BITS / VEC_ELEM_BITS) + 1;
+                    p_vec((idx5 + 1) * VALID_BITS - 1, idx5 * VALID_BITS) = tmp1.data(1 * VEC_ELEM_BITS + VALID_BITS - 1, 1 * VEC_ELEM_BITS);
+
+                    const uint32_t idx6 = 1 * (PLIO_BITS / VEC_ELEM_BITS) + 2;
+                    p_vec((idx6 + 1) * VALID_BITS - 1, idx6 * VALID_BITS) = tmp1.data(2 * VEC_ELEM_BITS + VALID_BITS - 1, 2 * VEC_ELEM_BITS);
+
+                    const uint32_t idx7 = 1 * (PLIO_BITS / VEC_ELEM_BITS) + 3;
+                    p_vec((idx7 + 1) * VALID_BITS - 1, idx7 * VALID_BITS) = tmp1.data(3 * VEC_ELEM_BITS + VALID_BITS - 1, 3 * VEC_ELEM_BITS);
+
+                    p_vec = p_vec << (v * VALID_BITS);
+
+                    res += p_vec;
+                    if(v == 2){
+                        ap_uint<DDR_BITS + VEC_SIZE * VALID_BITS> fifo_tmp = 0;
+                        fifo_tmp = res(VEC_SIZE * VALID_BITS - 1, 0);
+                        fifo += fifo_tmp << shift[idx];
+                        idx++;
+                        remains += VEC_SIZE * VALID_BITS;
+                        carry = res(VEC_SIZE * VALID_BITS + 2 * VALID_BITS - 1, VEC_SIZE * VALID_BITS);
+                        if(remains >= DDR_BITS){
+                            merge0_out << fifo(DDR_BITS - 1, 0);
+                            fifo = (fifo >> DDR_BITS);
+                            remains -= DDR_BITS;
+                        }
+                    }
+                }
+            }
+            merge0_out << fifo(DDR_BITS - 1, 0);
+            ap_uint<DDR_BITS> tmp = 0;
+            tmp(2 * VALID_BITS - 1, 0) = carry;
+            merge0_out << tmp;
+        }
+    }
+}
+
+void serialize_merge_stream(hls::stream<ap_uint<DDR_BITS>> &serialize_out, hls::stream<ap_uint<DDR_BITS>> &merge0_out, hls::stream<ap_uint<DDR_BITS>> &merge1_out, uint32_t size, uint32_t tails, uint32_t batch, uint32_t repeat){
+    for(uint32_t rep = 0; rep < repeat; ++rep){
+        for(uint32_t i = 0; i < batch; ++i){
+            for(uint32_t j = 0; j < size; ++j){
+#pragma HLS pipeline II = 1
+                serialize_out << merge0_out.read();
+            }
+            for(uint32_t j = 0; j < tails; ++j){
+#pragma HLS pipeline II = 1
+                serialize_out << merge1_out.read();
+            }
+        }
+    }
+}
+
+
+void read_ddr(ap_uint<DDR_BITS> *mem_in, hls::stream<ap_uint<DDR_BITS>> &ddr_in_s, const uint32_t batch, const uint32_t repeat, const bool block_ddr){
+    ap_uint<DDR_BITS> buf_tmp[TASK_INPUT_CHUNK];
+    if(block_ddr){
+        for(uint32_t i = 0; i < TASK_INPUT_CHUNK; ++i){
+            buf_tmp[i] = mem_in[i];
+        }
+    }
+    for(uint32_t rep = 0; rep < repeat; ++rep){
+        uint32_t idx = 0;
+        for(uint32_t i = 0; i < batch; ++i){
+            for(uint32_t j = 0; j < TASK_INPUT_CHUNK; ++j){
+#pragma HLS pipeline II = 1
+                ap_uint<DDR_BITS> tmp;
+                if(!block_ddr){
+                    tmp = mem_in[idx++];
+                }else{
+                    tmp = buf_tmp[j];
+                }
+                ddr_in_s << tmp;
+            }
+        }
+    }
+}
+
+void write_ddr(ap_uint<DDR_BITS> *mem_out, hls::stream<ap_uint<DDR_BITS>> &out_s, const uint32_t batch, const uint32_t repeat, const bool block_ddr){
+    for(uint32_t rep = 0; rep < repeat; ++rep){
+        uint32_t idx = 0;
+        for(uint32_t i = 0; i < batch; ++i){
+            for(uint32_t j = 0; j < TASK_OUTPUT_CHUNK; ++j){
+#pragma HLS pipeline II = 1
+                ap_uint<DDR_BITS> tmp = out_s.read();
+                if(!block_ddr){
+                    mem_out[idx++] = tmp;
+                }
+            }
+        }
+    }
+}
+
+void split_input_a(hls::stream<ap_uint<PLIO_BITS>> &in_s, hls::stream<ap_uint<PLIO_BITS>> &in0_s, hls::stream<ap_uint<PLIO_BITS>> &in1_s, uint32_t size, uint32_t tails, const uint32_t batch, const uint32_t repeat){
+    for(uint32_t rep = 0; rep < repeat; ++rep){
+        for(uint32_t i = 0; i < batch; ++i){
+            for(uint32_t j = 0; j < size; ++j){
+#pragma HLS pipeline II = 1
+                in0_s << in_s.read();
+            }
+            for(uint32_t j = 0; j < tails; ++j){
+#pragma HLS pipeline II = 1
+                in1_s << in_s.read();
+            }
+        }
+    }
+}
+
+void send_plio(hls::stream<ap_uint<PLIO_BITS>> &in0_s, hls::stream<qdma_axis<PLIO_BITS, 0, 0, 0> > &plio, uint32_t size, const uint32_t batch, const uint32_t repeat, bool block_aie){
+    for(uint32_t rep = 0; rep < repeat; ++rep){
+        for(uint32_t i = 0; i < batch; ++i){
+            for(uint32_t j = 0; j < size; ++j){
+#pragma HLS pipeline II = 1
+                qdma_axis<PLIO_BITS, 0, 0, 0> tmp;
+                tmp.data = in0_s.read();
+                tmp.keep_all();
+     
+                plio.write(tmp);
+                
+            }
+        }
+    }
+}
+
+
+void split_input_b(hls::stream<ap_uint<PLIO_BITS>> &in_s, hls::stream<ap_uint<PLIO_BITS>> &in0_s, hls::stream<ap_uint<PLIO_BITS>> &in1_s, uint32_t size0, uint32_t size1, uint32_t size2, const uint32_t batch, const uint32_t repeat){
+    for(uint32_t rep = 0; rep < repeat; ++rep){
+        for(uint32_t i = 0; i < batch; ++i){
+            for(uint32_t j = 0; j < size0; ++j){
+#pragma HLS pipeline II = 1
+                in0_s << in_s.read();
+            }
+            for(uint32_t j = 0; j < size1; ++j){
+#pragma HLS pipeline II = 1
+                ap_uint<PLIO_BITS> tmp = in_s.read();
+                in0_s << tmp;
+                in1_s << tmp;
+            }
+            for(uint32_t j = 0; j < size2; ++j){
+#pragma HLS pipeline II = 1
+                in1_s << in_s.read();
+            }
+        }
+    }
+}
+
+
+extern "C" {
+void pl_kernel(ap_uint<DDR_BITS> *mem_in_a, ap_uint<DDR_BITS> *mem_in_b, ap_uint<DDR_BITS> *mem_out, uint32_t batch, uint32_t repeat, const bool block_ddr, bool block_aie \
+            {%for i in range(PLIO_A)%}, hls::stream<qdma_axis<PLIO_BITS, 0, 0, 0> > &p_0_a{{i}}{%endfor%} \
+            {%for i in range(PLIO_B)%}, hls::stream<qdma_axis<PLIO_BITS, 0, 0, 0> > &p_0_b{{i}}{%endfor%} \
+            {%for i in range(OUTPUT_AIE)%}, hls::stream<qdma_axis<PLIO_BITS, 0, 0, 0> > &p_0_c{{i}}{%endfor%}){
+#pragma HLS interface m_axi offset=slave bundle=gmem0 port=mem_in_a max_read_burst_length=16 num_read_outstanding=16
+#pragma HLS interface m_axi offset=slave bundle=gmem1 port=mem_in_b max_read_burst_length=16 num_read_outstanding=16
+#pragma HLS interface m_axi offset=slave bundle=gmem2 port=mem_out max_read_burst_length=16 num_read_outstanding=16
+
+#pragma HLS interface s_axilite bundle=control port=mem_in_a
+#pragma HLS interface s_axilite bundle=control port=mem_in_b
+#pragma HLS interface s_axilite bundle=control port=mem_out
+
+#pragma HLS interface s_axilite bundle=control port=batch
+#pragma HLS interface s_axilite bundle=control port=repeat
+#pragma HLS interface s_axilite bundle=control port=block_ddr
+#pragma HLS interface s_axilite bundle=control port=block_aie
+
+#pragma HLS interface s_axilite bundle=control port=return
+
+for(uint32_t rep = 0; rep < repeat; ++rep){
+    hls::stream<ap_uint<DDR_BITS>> raw_in_a_s;
+    hls::stream<ap_uint<DDR_BITS>> raw_in_b_s;
+    hls::stream<ap_uint<PLIO_BITS>> reorganized_a_s;
+    hls::stream<ap_uint<PLIO_BITS>> reorganized_b_s;
+
+#pragma HLS STREAM variable = raw_in_a_s depth = 32
+#pragma HLS STREAM variable = raw_in_b_s depth = 32
+#pragma HLS STREAM variable = reorganized_a_s depth = 32
+#pragma HLS STREAM variable = reorganized_b_s depth = 32
+
+{% for i in range(PLIO_A) %}
+    hls::stream<ap_uint<PLIO_BITS>> pl_a{{i}}_s;{% endfor %}
+{% for i in range(PLIO_A) %}
+#pragma HLS STREAM variable = pl_a{{i}}_s depth = {{ (AIE_H / 4) | int }}{% endfor %}
+{% for i in range(PLIO_B) %}
+    hls::stream<ap_uint<PLIO_BITS>> pl_b{{i}}_s;{% endfor %}
+{% for i in range(PLIO_B) %}
+#pragma HLS STREAM variable = pl_b{{i}}_s depth = {{ (AIE_W / 4) | int }}{% endfor %}
+
+{% for i in range(PLIO_A - 1) %}
+    hls::stream<ap_uint<PLIO_BITS>> pl_pa{{i}}_s;{% endfor %}
+{# {% for i in range(PLIO_A - 1) %}
+#pragma HLS STREAM variable = pl_pa{{i}}_s depth = 64{% endfor %} #}
+
+{% for i in range(PLIO_B - 1) %}
+    hls::stream<ap_uint<PLIO_BITS>> pl_pb{{i}}_s;{% endfor %}
+{# {% for i in range(PLIO_B - 1) %}
+#pragma HLS STREAM variable = pl_pb{{i}}_s depth = 64{% endfor %} #}
+
+{% for i in range(OUTPUT_AIE) %}
+    hls::stream<ap_uint<DDR_BITS>> merge0_c{{i}};{% endfor %}
+{% for i in range(OUTPUT_AIE) %}
+#pragma HLS STREAM variable = merge0_c{{i}} depth = {{ (AIE_W / 4) | int }}{% endfor %}
+
+{% for i in range(OUTPUT_AIE - 1) %}
+    hls::stream<ap_uint<DDR_BITS>> merge0_pc{{i}};{% endfor %}
+{# {% for i in range(OUTPUT_AIE - 1) %}
+#pragma HLS STREAM variable = merge0_pc{{i}} depth = 64{% endfor %} #}
+
+    hls::stream<ap_uint<DDR_BITS>> serialized_out;
+    hls::stream<ap_uint<DDR_BITS>> final_merge_out;
+#pragma HLS STREAM variable = serialized_out depth = 32
+#pragma HLS STREAM variable = final_merge_out depth = 32
+
+   
+#pragma HLS dataflow
+    
+    read_ddr(mem_in_a, raw_in_a_s, batch, 1, block_ddr);
+    read_ddr(mem_in_b, raw_in_b_s, batch, 1, block_ddr);
+    reorganize_a(reorganized_a_s, raw_in_a_s, batch, 1);
+    reorganize_b(reorganized_b_s, raw_in_b_s, batch, 1);
+{% if PLIO_A == 2%}
+    split_input_a(reorganized_a_s, pl_a0_s, pl_a1_s, AIE_H / (PLIO_BITS / 32), AIE_H / (PLIO_BITS / 32), batch, 1);
+{% else %}
+    split_input_a(reorganized_a_s, pl_a0_s, pl_pa0_s, AIE_H / (PLIO_BITS / 32), AIE_H / (PLIO_BITS / 32) * {{ PLIO_A - 1 }}, batch, 1);
+    {% for i in range(PLIO_A - 3) %}
+    split_input_a(pl_pa{{i}}_s, pl_a{{i + 1}}_s, pl_pa{{i + 1}}_s, AIE_H / (PLIO_BITS / 32), AIE_H / (PLIO_BITS / 32) * {{ PLIO_A - 2 - i }}, batch, 1);
+    {% endfor %}
+    split_input_a(pl_pa{{PLIO_A - 3}}_s, pl_a{{PLIO_A - 2}}_s, pl_a{{PLIO_A - 1}}_s, AIE_H / (PLIO_BITS / 32), AIE_H / (PLIO_BITS / 32), batch, 1);
+{% endif %}
+
+{% for i in range(PLIO_A) %}
+    send_plio(pl_a{{i}}_s, p_0_a{{i}}, AIE_H / (PLIO_BITS / 32), batch, 1, block_aie);
+{% endfor %}
+
+    split_input_b(reorganized_b_s, pl_b0_s, pl_pb0_s, AIE_H / (PLIO_BITS / 32), AIE_W / (PLIO_BITS / 32), AIE_W * {{PLIO_B - 1}} / (PLIO_BITS / 32), batch, 1);
+{% for i in range(PLIO_B - 3) %}
+    split_input_b(pl_pb{{i}}_s, pl_b{{i + 1}}_s, pl_pb{{i + 1}}_s, AIE_H / (PLIO_BITS / 32), AIE_W / (PLIO_BITS / 32), AIE_W * {{PLIO_B - 2 - i}} / (PLIO_BITS / 32), batch, 1);
+{% endfor %}
+    split_input_b(pl_pb{{PLIO_B - 3}}_s, pl_b{{PLIO_B - 2}}_s, pl_b{{PLIO_B - 1}}_s, AIE_H / (PLIO_BITS / 32), AIE_W / (PLIO_BITS / 32), AIE_W / (PLIO_BITS / 32), batch, 1);
+
+{% for i in range(PLIO_B) %}
+    send_plio(pl_b{{i}}_s, p_0_b{{i}}, (AIE_W + AIE_H) / (PLIO_BITS / 32), batch, 1, block_aie);
+{% endfor %}
+
+{% for i in range(OUTPUT_AIE) %}
+    receive_plio(merge0_c{{i}}, p_0_c{{i}}, batch, 1, block_aie);
+{% endfor %}
+
+    serialize_merge_stream(serialized_out, merge0_c0, merge0_pc0, AIE_OUTPUT_CHUNK, AIE_OUTPUT_CHUNK * {{OUTPUT_AIE - 1}}, batch, 1);
+
+{% for i in range(OUTPUT_AIE - 3) %}
+    serialize_merge_stream(merge0_pc{{i}}, merge0_c{{i + 1}}, merge0_pc{{i + 1}}, AIE_OUTPUT_CHUNK, AIE_OUTPUT_CHUNK * {{OUTPUT_AIE - 2 - i}}, batch, 1);
+{% endfor %}
+    serialize_merge_stream(merge0_pc{{OUTPUT_AIE - 3}}, merge0_c{{OUTPUT_AIE - 2}}, merge0_c{{OUTPUT_AIE - 1}}, AIE_OUTPUT_CHUNK, AIE_OUTPUT_CHUNK, batch, 1);
+
+    merge_phase2(final_merge_out, serialized_out, batch, 1);
+
+    write_ddr(mem_out, final_merge_out, batch, 1, block_ddr);
+}
+
+}
+}

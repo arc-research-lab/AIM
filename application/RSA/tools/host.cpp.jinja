@@ -1,0 +1,316 @@
+#include "./aie_graph.h"
+#include "./config.h"
+
+#define DATA_SIZE (INPUT_BITS/32)
+#define N_ITER 1
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <fstream>
+#include <cstring>
+#define AP_INT_MAX_W 16384
+#include <ap_int.h>
+
+// This is used for the PL Kernels
+#include "xrt/xrt.h"
+#include "xrt/experimental/xrt_kernel.h"
+
+// Using the ADF API that call XRT API
+#include "adf/adf_api/XRTConfig.h"
+simpleGraph addergraph;
+static std::vector<char> load_xclbin(xrtDeviceHandle device, const std::string& fnm) {
+    if (fnm.empty()) throw std::runtime_error("No xclbin specified");
+
+    std::ifstream stream(fnm);
+    stream.seekg(0, stream.end);
+    size_t size = stream.tellg();
+    stream.seekg(0, stream.beg);
+
+    std::vector<char> header(size);
+    stream.read(header.data(), size);
+
+    auto top = reinterpret_cast<const axlf*>(header.data());
+    if (xrtDeviceLoadXclbin(device, top)) throw std::runtime_error("Xclbin loading failed");
+
+    return header;
+}
+
+template<int N>
+ap_uint<N> montpro(ap_uint<N> a, ap_uint<N> b, ap_uint<N> m, ap_uint<N> u){
+    ap_uint<N * 2> d = a;
+    d *= b;
+    ap_uint<N * 2> t = d * u;
+    ap_uint<N> c = t(N - 1, 0);
+    ap_uint<N * 2> e = c * m;
+    ap_uint<N * 2> res = d + e;
+    ap_uint<N> result = res(N * 2 - 1, N);
+    if(result > m) result = result - m;
+    return result;
+}
+
+std::string getKey(std::string path){
+	std::ifstream ifs;
+	ifs.open(path);
+	std::string ss = "";
+    std::getline(ifs, ss);
+	return ss;
+}
+
+int main(int argc, char** argv) {
+
+    int en_repeat = 1;
+    int de_repeat = 1;
+    int enable_vrf = 1;
+    bool block_ddr = false;
+    uint32_t batch = 1 * 2;
+    // int e = 3;
+
+    if(argc == 7){
+        batch = atoi(argv[2]);
+        en_repeat = atoi(argv[3]);
+        de_repeat = atoi(argv[4]);
+        enable_vrf = atoi(argv[5]); 
+        block_ddr = (atoi(argv[6]) == 1);
+        // e = atoi(argv[6]);
+    }
+    
+    // const uint32_t BATCH = batch;
+    std::cout << "encryption repeat " << en_repeat << " times" << std::endl;
+    std::cout << "decryption repeat " << de_repeat << " times" << std::endl;
+    std::cout << "batch " << batch << std::endl;
+    // std::cout << "e " << e << std::endl;
+    std::cout << "software verify?  " << (enable_vrf == 1 ? "yes" : "no") << std::endl;
+
+
+    //////////////////////////////////////////
+    // Open xclbin
+    //////////////////////////////////////////
+    auto dhdl = xrtDeviceOpen(0); // Open Device the local device
+    if (dhdl == nullptr) throw std::runtime_error("No valid device handle found. Make sure using right xclOpen index.");
+    auto xclbin = load_xclbin(dhdl, "krnl_adder.xclbin");
+    auto top = reinterpret_cast<const axlf*>(xclbin.data());
+    adf::registerXRT(dhdl, top->m_header.uuid);
+
+    const int sizeIn = DATA_SIZE;
+    const int sizeOut = DATA_SIZE * 2;
+
+    ap_uint<INPUT_BITS> m("{{modulus}}");
+    ap_uint<INPUT_BITS> mp("{{modulus_p}}");
+    ap_uint<INPUT_BITS> rmod("{{rmod}}");
+    ap_uint<INPUT_BITS> rMod_x_1("{{rmod_x_1}}");
+    ap_uint<INPUT_BITS> pub_e("0x10001");
+    ap_uint<INPUT_BITS> prv_e("{{prv_e}}");
+
+    uint32_t * buf_n = (uint32_t *) malloc(INPUT_BITS / 8);
+    uint32_t * buf_pub_e = (uint32_t *) malloc(INPUT_BITS / 8);
+    uint32_t * buf_prv_e = (uint32_t *) malloc(INPUT_BITS / 8);
+    uint32_t * buf_nInv = (uint32_t *) malloc(INPUT_BITS / 8);
+    uint32_t * buf_rMod = (uint32_t *) malloc(INPUT_BITS / 8);
+    uint32_t * buf_rMod_x_1 = (uint32_t *) malloc(INPUT_BITS / 8);
+
+    for(int i = 0; i < INPUT_BITS / 32; ++i){
+        buf_n[i] = m((i + 1) * 32 - 1, i * 32);
+        buf_pub_e[i] = pub_e((i + 1) * 32 - 1, i * 32);
+        buf_prv_e[i] = prv_e((i + 1) * 32 - 1, i * 32);
+        buf_nInv[i] = mp((i + 1) * 32 - 1, i * 32);
+        buf_rMod[i] = rmod((i + 1) * 32 - 1, i * 32);
+        buf_rMod_x_1[i] = rMod_x_1((i + 1) * 32 - 1, i * 32);
+    }
+    srand(time(0));
+{% for p in range(RSA_IMPL) %}
+    uint32_t *data_in_{{p}} = (uint32_t *) malloc(batch * INPUT_BITS / 8);
+    uint32_t *cypher_{{p}} = (uint32_t *) malloc(batch * INPUT_BITS / 8);
+{% endfor -%}
+    for(int i = 0; i < batch; ++i){
+        ap_uint<INPUT_BITS> tmp;
+{% for p in range(RSA_IMPL) %}
+        for(int j = 0; j < INPUT_BITS / 32; ++j){
+            tmp((j + 1) * 32 - 1, j * 32) = rand();
+        }
+        tmp %= m;
+        for(int j = 0; j < INPUT_BITS / 32; ++j){
+            data_in_{{p}}[i * INPUT_BITS / 32 + j] = tmp((j + 1) * 32 - 1, j * 32);
+        }
+{% endfor -%}
+    }
+
+    
+{% for p in range(RSA_IMPL) %}
+
+    xrtBufferHandle data_in_hdl_{{p}} = xrtBOAlloc(dhdl, batch * INPUT_BITS / 8, 0, 0);
+    auto data_in_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(data_in_hdl_{{p}}));
+    memcpy(data_in_mapped_{{p}}, data_in_{{p}}, batch * INPUT_BITS / 8);
+
+    xrtBufferHandle exp_hdl_{{p}} = xrtBOAlloc(dhdl, INPUT_BITS / 8, 0, 0);
+    auto exp_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(exp_hdl_{{p}}));
+    memcpy(exp_mapped_{{p}}, buf_pub_e, INPUT_BITS / 8);
+
+    xrtBufferHandle n_hdl_{{p}} = xrtBOAlloc(dhdl, INPUT_BITS / 8, 0, 0);
+    auto n_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(n_hdl_{{p}}));
+    memcpy(n_mapped_{{p}}, buf_n, INPUT_BITS / 8);
+
+    xrtBufferHandle nInv_hdl_{{p}} = xrtBOAlloc(dhdl, INPUT_BITS / 8, 0, 0);
+    auto nInv_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(nInv_hdl_{{p}}));
+    memcpy(nInv_mapped_{{p}}, buf_nInv, INPUT_BITS / 8);
+
+    xrtBufferHandle rMod_hdl_{{p}} = xrtBOAlloc(dhdl, INPUT_BITS / 8, 0, 0);
+    auto rMod_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(rMod_hdl_{{p}}));
+    memcpy(rMod_mapped_{{p}}, buf_rMod, INPUT_BITS / 8);
+
+    xrtBufferHandle rMod_x_1_hdl_{{p}} = xrtBOAlloc(dhdl, INPUT_BITS / 8, 0, 0);
+    auto rMod_x_1_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(rMod_x_1_hdl_{{p}}));
+    memcpy(rMod_x_1_mapped_{{p}}, buf_rMod_x_1, INPUT_BITS / 8);
+
+    xrtBufferHandle data_out_hdl_{{p}} = xrtBOAlloc(dhdl, batch * INPUT_BITS / 8, 0, 0);
+    auto data_out_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(data_out_hdl_{{p}}));
+    memset(data_out_mapped_{{p}}, 0xABCDEF00, batch * INPUT_BITS / 8);
+
+{% endfor %}
+
+    printf("graph init. This does nothing because CDO in boot PDI already configures AIE.\n");
+    addergraph.init();
+
+    printf("graph run\n");
+    addergraph.run(-1);
+
+
+    double kernel_time_in_sec = 0;
+    std::chrono::duration<double> kernel_time(0);
+    auto kernel_start = std::chrono::high_resolution_clock::now();
+{% for p in range(RSA_IMPL) %}
+    xrtKernelHandle pl_kernel_khdl1_{{p}} = xrtPLKernelOpen(dhdl, top->m_header.uuid, "pl_kernel:{pl_kernel_{{p}}}");
+{% endfor -%}
+
+{% for p in range(RSA_IMPL) %}
+    xrtRunHandle pl_kernel_rhdl1_{{p}} = xrtKernelRun(pl_kernel_khdl1_{{p}}, data_in_hdl_{{p}}, data_out_hdl_{{p}}, exp_hdl_{{p}}, n_hdl_{{p}}, nInv_hdl_{{p}}, rMod_hdl_{{p}}, rMod_x_1_hdl_{{p}}, 20, batch, en_repeat, block_ddr{%for i in range(AIE_COL + AIE_ROW + OUTPUT_AIE)%}, nullptr{%endfor%});
+{% endfor -%}
+{% for p in range(RSA_IMPL) %}
+    auto state_{{p}} = xrtRunWait(pl_kernel_rhdl1_{{p}});
+{% endfor -%}
+
+{% for p in range(RSA_IMPL) %}
+    for(uint32_t i = 0; i < batch * INPUT_BITS / 32; ++i){
+        cypher_{{p}}[i] = data_out_mapped_{{p}}[i];
+    }
+{% endfor -%}
+
+    auto kernel_end = std::chrono::high_resolution_clock::now();
+    kernel_time = std::chrono::duration<double>(kernel_end - kernel_start);
+    kernel_time_in_sec = kernel_time.count();
+    std::cout << "encryption repeat: " << en_repeat << std::endl;
+    std::cout << "encryption time: " << kernel_time_in_sec << " sec" << std::endl;
+
+{% for p in range(RSA_IMPL) %}
+    xrtRunClose(pl_kernel_rhdl1_{{p}});
+    xrtKernelClose(pl_kernel_khdl1_{{p}});
+{% endfor -%}
+    
+{# {% for p in range(RSA_IMPL) %}
+    xrtBOFree(data_in_hdl_{{p}});
+    xrtBOFree(exp_hdl_{{p}});
+    xrtBOFree(n_hdl_{{p}});
+    xrtBOFree(nInv_hdl_{{p}});
+    xrtBOFree(rMod_hdl_{{p}});
+    xrtBOFree(rMod_x_1_hdl_{{p}});
+    xrtBOFree(data_out_hdl_{{p}});
+{% endfor -%} #}
+
+{% for p in range(RSA_IMPL) %}
+    xrtBufferHandle decrypt_data_in_hdl_{{p}} = xrtBOAlloc(dhdl, batch * INPUT_BITS / 8, 0, 0);
+    auto decrypt_data_in_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(decrypt_data_in_hdl_{{p}}));
+    memcpy(decrypt_data_in_mapped_{{p}}, cypher_{{p}}, batch * INPUT_BITS / 8);
+
+    xrtBufferHandle decrypt_exp_hdl_{{p}} = xrtBOAlloc(dhdl, INPUT_BITS / 8, 0, 0);
+    auto decrypt_exp_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(decrypt_exp_hdl_{{p}}));
+    memcpy(decrypt_exp_mapped_{{p}}, buf_prv_e, INPUT_BITS / 8);
+
+    xrtBufferHandle decrypt_n_hdl_{{p}} = xrtBOAlloc(dhdl, INPUT_BITS / 8, 0, 0);
+    auto decrypt_n_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(decrypt_n_hdl_{{p}}));
+    memcpy(decrypt_n_mapped_{{p}}, buf_n, INPUT_BITS / 8);
+
+    xrtBufferHandle decrypt_nInv_hdl_{{p}} = xrtBOAlloc(dhdl, INPUT_BITS / 8, 0, 0);
+    auto decrypt_nInv_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(decrypt_nInv_hdl_{{p}}));
+    memcpy(decrypt_nInv_mapped_{{p}}, buf_nInv, INPUT_BITS / 8);
+
+    xrtBufferHandle decrypt_rMod_hdl_{{p}} = xrtBOAlloc(dhdl, INPUT_BITS / 8, 0, 0);
+    auto decrypt_rMod_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(decrypt_rMod_hdl_{{p}}));
+    memcpy(decrypt_rMod_mapped_{{p}}, buf_rMod, INPUT_BITS / 8);
+
+    xrtBufferHandle decrypt_rMod_x_1_hdl_{{p}} = xrtBOAlloc(dhdl, INPUT_BITS / 8, 0, 0);
+    auto decrypt_rMod_x_1_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(decrypt_rMod_x_1_hdl_{{p}}));
+    memcpy(decrypt_rMod_x_1_mapped_{{p}}, buf_rMod_x_1, INPUT_BITS / 8);
+
+    xrtBufferHandle decrypt_data_out_hdl_{{p}} = xrtBOAlloc(dhdl, batch * INPUT_BITS / 8, 0, 0);
+    auto decrypt_data_out_mapped_{{p}} = reinterpret_cast<uint32_t*>(xrtBOMap(decrypt_data_out_hdl_{{p}}));
+    memset(decrypt_data_out_mapped_{{p}}, 0xABCDEF00, batch * INPUT_BITS / 8);
+{% endfor -%}
+
+    kernel_start = std::chrono::high_resolution_clock::now();
+{% for p in range(RSA_IMPL) %}  
+    xrtKernelHandle pl_kernel_khdl2_{{p}} = xrtPLKernelOpen(dhdl, top->m_header.uuid, "pl_kernel:{pl_kernel_{{p}}}");
+{% endfor -%}
+
+{% for p in range(RSA_IMPL) %}  
+    xrtRunHandle pl_kernel_rhdl2_{{p}} = xrtKernelRun(pl_kernel_khdl2_{{p}}, decrypt_data_in_hdl_{{p}}, decrypt_data_out_hdl_{{p}}, decrypt_exp_hdl_{{p}}, decrypt_n_hdl_{{p}}, decrypt_nInv_hdl_{{p}}, decrypt_rMod_hdl_{{p}}, decrypt_rMod_x_1_hdl_{{p}}, INPUT_BITS, batch, de_repeat, block_ddr{%for i in range(AIE_COL + AIE_ROW + OUTPUT_AIE)%}, nullptr{%endfor%});
+{% endfor -%}
+
+{% for p in range(RSA_IMPL) %}  
+    auto state2_{{p}} = xrtRunWait(pl_kernel_rhdl2_{{p}});
+{% endfor -%}
+
+    kernel_end = std::chrono::high_resolution_clock::now();
+    kernel_time = std::chrono::duration<double>(kernel_end - kernel_start);
+    kernel_time_in_sec = kernel_time.count();
+    std::cout << "decryption repeat: " << de_repeat << std::endl;
+    std::cout << "decryption time: " << kernel_time_in_sec << " sec" << std::endl;
+
+
+    int errorCount = 0;
+    if(enable_vrf == 1)
+    {
+{% for p in range(RSA_IMPL) %}  
+        for(int i = 0; i < batch * INPUT_BITS / 32; ++i){
+            if(decrypt_data_out_mapped_{{p}}[i] != data_in_{{p}}[i]){
+                errorCount++;
+                std::cout << "plaintext[" << i << "]: " << data_in_{{p}}[i] << " != " << "decryption[" << i << "]: " << decrypt_data_out_mapped_{{p}}[i] << std::endl;
+            }
+        }
+{% endfor -%}
+        if (errorCount)
+            printf("Test(%d) failed with %d errors\n", {{RSA_IMPL}} * batch * INPUT_BITS / 32, errorCount);
+        else
+            printf("TEST PASSED!!\n");
+    }
+
+{% for p in range(RSA_IMPL) %}  
+    xrtBOFree(data_in_hdl_{{p}});
+    xrtBOFree(exp_hdl_{{p}});
+    xrtBOFree(n_hdl_{{p}});
+    xrtBOFree(nInv_hdl_{{p}});
+    xrtBOFree(rMod_hdl_{{p}});
+    xrtBOFree(rMod_x_1_hdl_{{p}});
+    xrtBOFree(data_out_hdl_{{p}});
+
+    xrtBOFree(decrypt_data_in_hdl_{{p}});
+    xrtBOFree(decrypt_exp_hdl_{{p}});
+    xrtBOFree(decrypt_n_hdl_{{p}});
+    xrtBOFree(decrypt_nInv_hdl_{{p}});
+    xrtBOFree(decrypt_rMod_hdl_{{p}});
+    xrtBOFree(decrypt_rMod_x_1_hdl_{{p}});
+    xrtBOFree(decrypt_data_out_hdl_{{p}});
+    free(data_in_{{p}});
+    free(cypher_{{p}});
+{% endfor -%}
+
+    free(buf_n);
+    free(buf_pub_e);
+    free(buf_prv_e);
+    free(buf_nInv);
+    free(buf_rMod);
+    free(buf_rMod_x_1);
+
+    xrtDeviceClose(dhdl);
+    return 0;
+
+}
