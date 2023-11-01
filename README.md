@@ -1,3 +1,12 @@
+# Team
+Principal Investigator: Dr. Peipei Zhou, https://peipeizhou-eecs.github.io/
+
+Ph.D. Students: Zhuoping Yang and Jinming Zhuang
+
+Faculty Collaborators: Drs. Alex Jones, Cunxi Yu
+
+Student Collaborator: Jiaqi Yin
+
 # AIM: Accelerating **A**rbitrary-precision **I**nteger **M**ultiplication on Heterogeneous Reconfigurable Computing Platform Versal ACAP (ICCAD'23)
 
 
