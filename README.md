@@ -3,7 +3,7 @@ Principal Investigator: Dr. Peipei Zhou, https://peipeizhou-eecs.github.io/
 
 Ph.D. Students: Zhuoping Yang and Jinming Zhuang
 
-Faculty Collaborators: Drs. Alex Jones, Cunxi Yu
+Faculty Collaborators: Drs. Alex Jones, Cunxi Yu
 
 Student Collaborator: Jiaqi Yin
 
