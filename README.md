@@ -12,7 +12,7 @@ Student Collaborator: Jiaqi Yin
 # AIM: Accelerating **A**rbitrary-precision **I**nteger **M**ultiplication on Heterogeneous Reconfigurable Computing Platform Versal ACAP (ICCAD'23) 
 
 ## ACM/IEEE Reference Format
-Z. Yang, J. Zhuang, J. Yin, C. Yu, A. K. Jones and P. Zhou, "AIM: Accelerating Arbitrary-Precision Integer Multiplication on Heterogeneous Reconfigurable Computing Platform Versal ACAP," 2023 IEEE/ACM International Conference on Computer Aided Design (ICCAD), San Francisco, CA, USA, 2023, pp. 1-9, doi: 10.1109/ICCAD57390.2023.10323754.
+Z. Yang, J. Zhuang, J. Yin, C. Yu, A. K. Jones and P. Zhou, "AIM: Accelerating Arbitrary-Precision Integer Multiplication on Heterogeneous Reconfigurable Computing Platform Versal ACAP," 2023 IEEE/ACM International Conference on Computer Aided Design (ICCAD), San Francisco, CA, USA, 2023, pp. 1-9, [doi: 10.1109/ICCAD57390.2023.10323754](https://doi.org/10.1109/ICCAD57390.2023.10323754).
 
 
 
