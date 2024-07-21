@@ -1,9 +1,9 @@
 # Team
 Principal Investigator: Prof. Peipei Zhou, https://peipeizhou-eecs.github.io/
 
-Ph.D. Students: Zhuoping Yang (Lead)and Jinming Zhuang
+Ph.D. Students: Zhuoping Yang (Lead) and Jinming Zhuang
 
-Faculty Collaborators: Profs. Alex Jones, Cunxi Yu
+Faculty Collaborators: Profs. Cunxi Yu (University of Maryland), Alex Jones (Syracuse University)
 
 Student Collaborator: Jiaqi Yin
 
