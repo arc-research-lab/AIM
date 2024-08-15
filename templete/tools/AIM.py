@@ -64,7 +64,7 @@ for r in range(1, int(config["Constraints"]["MAX_ROW"]) + 1):
     perf_ddr = int(config["Profiling"]["DDR_Bandwidth"]) * 8 / (INPUT_BITS*4)*(INPUT_BITS/32)**2 * 2
     perf = min(perf_cycle, perf_ddr)
 
-    VALID_CONF.append([INPUT_BITS, pe, r, r, 512, 128, int(config["Config"]["PL_Freq"]), perf])
+    VALID_CONF.append([INPUT_BITS, pe, hw, hw, 512, 128, int(config["Config"]["PL_Freq"]), perf])
 
     if max_perf < perf:
         max_perf_idx = conf_idx
