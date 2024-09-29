@@ -70,4 +70,13 @@ EDGE_COMMON_SW=/${YOUR_PATH}/xilinx-versal-common-v2021.1
 HLS_INCLUDE=/${YOUR_PATH}/Vitis_HLS/2021.1/include/
 ```
 
+Then, users need to setup the environment using the following commands:
+```bash
+source /${YOUR_PATH}/Vitis/2021.1/settings64.sh  
+source /${YOUR\_PATH}/xrt/setup.sh  
+unset LD_LIBRARY_PATH  
+source /${YOUR\_PATH}/environment-setup-cortexa72-cortexa53-xilinx-linux
+```
+
 To compile the project, uses can use the [**build.sh**](templete/tools/build.sh). If the target frequency cannot be achieved, it will check the worst negative slack and recompile the project with a decreased frequency.
+
