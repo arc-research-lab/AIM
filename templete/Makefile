@@ -18,9 +18,10 @@
 ############################## Help Section ##############################
 .PHONY: help
 PLATFORM=/opt/xilinx/platforms/xilinx_vck190_base_202110_1/xilinx_vck190_base_202110_1.xpfm
-
 SYSROOT=/opt/petalinux/2021.1/sysroots/cortexa72-cortexa53-xilinx-linux
 EDGE_COMMON_SW=/home/ubuntu/xilinx-versal-common-v2021.1
+HLS_INCLUDE=/opt/tools/xilinx/Vitis_HLS/2021.1/include/
+
 help::
 	$(ECHO) "Makefile Usage:"
 	$(ECHO) "  make all TARGET=<sw_emu/hw_emu/hw> DEVICE=<FPGA platform> HOST_ARCH=<aarch32/aarch64/x86> EDGE_COMMON_SW=<rootfs and kernel image path>"
@@ -133,12 +134,13 @@ GCC_INCLUDES := -I$(SYSROOT)/usr/include/xrt \
 				-I./  \
 				-I${XILINX_VITIS}/aietools/include \
 				-I${XILINX_VITIS}/include \
-				-I/opt/tools/xilinx/Vitis_HLS/2021.1/include/
+				-I${HLS_INCLUDE}
 
 GCC_LIB := -lxaiengine -ladf_api_xrt -lxrt_core -lxrt_coreutil \
 		   -L$(SYSROOT)/usr/lib \
 		   --sysroot=$(SYSROOT) \
 		   -L${XILINX_VITIS}/aietools/lib/aarch64.o
+
 
 .PHONY: all clean cleanall docs emconfig test test2 check
 all: kernels graph build host sd_card 
@@ -246,19 +248,3 @@ cleanall: clean
 	-$(RMDIR) build_dir* sd_card* .ipcache
 	-$(RMDIR) package.* run_app.sh test.out .AIE_SIM_CMD_LINE_OPTIONS
 	-$(RMDIR) _x* *xclbin.run_summary qemu-memory-_* emulation _vimage pl* start_simulation.sh *.xclbin
-
-
-
-PLIO_BITS := 64
-DDR_BITS := 512
-
-array:
-	python3 tools/gen_array.py $(SIZE) $(BITS) $(PLIO_BITS) $(DDR_BITS)
-
-test:
-	g++ -o test.out -I/opt/tools/xilinx/Vitis_HLS/2022.1/include/ test/test.cpp
-	./test.out
-
-verifysend:
-	g++ -o test.out -I/opt/tools/xilinx/Vitis_HLS/2022.1/include/ test/verifysend.cpp
-	./test.out

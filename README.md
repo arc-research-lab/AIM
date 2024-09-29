@@ -25,3 +25,49 @@ We carry out experiments on the proposed AIM architecture and compare it with SO
 ![image](./images/Compare.png)
 
 We also demonstrate the applicability of AIM architecture on three applications. Please find [LIM](./application/IntegerMultiplication/), [RSA](./application/RSA/), and [Mandelbrot](./application/Mandelbrot/) in this repo.
+
+## Installation
+AIM framework is verified on AMD Versal VCK190 using Vitis tool 2021.1 on Ubuntu 20.04. Users need to apply the AIE license from AMD and then setup the development environment as follows:
+
+**Step 1**
+Setup the Vitis tool. Users first need to download and install **Vitis 2021.1** tools from https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/vitis/archive-vitis.html 
+
+**Step 2**
+Setup the platform package (BSP) by downloading **VCK190 Base 2021.1** from https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/embedded-platforms/archive-vitis-embedded.html
+The files in BSP has the hardware information and should be accessible for the Vitis tools.
+
+
+**Step 3**
+Setup the Petalinux cross compilation toolchain. Users need to download **Versal common image** from https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/embedded-platforms/archive-vitis-embedded.html
+
+Then, execute the **sdk.sh** in the **PetaLinux 2021.1 Installer**
+
+**Step 4**
+Install dependencies required for the compilation:
+> sudo
+apt install make ocl-icd-libopencl1 opencl-headers
+ocl-icd-opencl-dev graphviz
+
+**Step 5**
+Install [Python3.8.10](https://www.python.org/downloads/release/python-3810/) and dependencies:
+> pip install jinja2 configparser
+
+## Usage - Large Integer Multiplication (LIM)
+Users can use the [AIM template](templete/) to generate their own projects that leverage AIM to compute arbitrary integer multiplication.
+
+As can be found in [AIM.conf](templete/tools/AIM.conf), the configuration file has three parts. The first part **[Config]** describe the application configuration and target PL frequency. Users can specify the bitwidth of multiplication and it does not have to be the power of 2. Besides, users can first set a high initial frequency, and AIM will automatically decrease the frequency if the timing violation happens.
+The second part **[Constraints]** describe how many hardware resources can be used for arbitrary integer multiplication. The third part **[Profiling]** is our profiling results that is used for modeling the hardware resource utilization and performce prediction.
+
+To generate the source code, users can execute the [python script](templete/tools/AIM.py). It will read the config file, generate the large integer multiplier, and report the estimated performance in GOPS.
+> python tools/AIM.py
+
+Before compiling the project, users need to ensure the following variables in the [Makefile](templete/Makefile) are set correctly. 
+
+```Makefile
+PLATFORM=/${YOUR_PATH}/xilinx_vck190_base_202110_1.xpfm
+SYSROOT=/${YOUR_PATH}/2021.1/sysroots/cortexa72-cortexa53-xilinx-linux
+EDGE_COMMON_SW=/${YOUR_PATH}/xilinx-versal-common-v2021.1
+HLS_INCLUDE=/${YOUR_PATH}/Vitis_HLS/2021.1/include/
+```
+
+To compile the project, uses can use the [**build.sh**](templete/tools/build.sh). If the target frequency cannot be achieved, it will check the worst negative slack and recompile the project with a decreased frequency.
