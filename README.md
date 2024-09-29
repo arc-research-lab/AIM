@@ -58,7 +58,7 @@ Users can use the [AIM template](templete/) to generate their own projects that 
 As can be found in [AIM.conf](templete/tools/AIM.conf), the configuration file has three parts. The first part **[Config]** describe the application configuration and target PL frequency. Users can specify the bitwidth of multiplication and it does not have to be the power of 2. Besides, users can first set a high initial frequency, and AIM will automatically decrease the frequency if the timing violation happens.
 The second part **[Constraints]** describe how many hardware resources can be used for arbitrary integer multiplication. The third part **[Profiling]** is our profiling results that is used for modeling the hardware resource utilization and performce prediction.
 
-To generate the source code, users can execute the [python script](templete/tools/AIM.py). It will read the config file, generate the large integer multiplier, and report the estimated performance in GOPS.
+To generate the source code, users can execute the [python script](templete/tools/AIM.py). It will read the config file, generate the large integer multiplier, and report the estimated performance in 32bit multiplication GOPS.
 > python tools/AIM.py
 
 Before compiling the project, users need to ensure the following variables in the [Makefile](templete/Makefile) are set correctly. 
