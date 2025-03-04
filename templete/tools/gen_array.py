@@ -179,55 +179,56 @@ class simpleGraph : public graph {
         runtime<ratio>(aie_aim_p''' + str(p) + '''[''' + str(AIE_NUM - 1) + ''']) = 1;
         '''
 
-        # aie top
-        for i in range(AIE_COL - 1):
-            code += '''
-        aie_aim_p''' + str(p) + '''[''' + str(i + 1) + '''] = kernel::create(aie_aim_top);
-        connect<window<AIE_H * 4> >(p_''' + str(p) + '''_in0[''' + str(i + 1) + '''], aie_aim_p''' + str(p) + '''[''' + str(i + 1) + '''].in[0]);
-        connect<window<AIE_W * 4 + AIE_H * 4> >(p_''' + str(p) + '''_in1[''' + str(i + 1) + '''], aie_aim_p''' + str(p) + '''[''' + str(i + 1) + '''].in[1]);
-        source(aie_aim_p''' + str(p) + '''[''' + str(i + 1) + ''']) = "aie_aim_top.cc";
-        runtime<ratio>(aie_aim_p''' + str(p) + '''[''' + str(i + 1) + ''']) = 1;
-        '''
-
-        for i in range(AIE_ROW - 2):
-            code += '''
-        aie_aim_p''' + str(p) + '''[''' + str((i + 2) * AIE_COL - 1) + '''] = kernel::create(aie_aim_top);
-        connect<window<AIE_H * 4> >(p_''' + str(p) + '''_in0[''' + str((i + 2) * AIE_COL - 1) + '''], aie_aim_p''' + str(p) + '''[''' + str((i + 2) * AIE_COL - 1) + '''].in[0]);
-        connect<window<AIE_W * 4 + AIE_H * 4> >(p_''' + str(p) + '''_in1[''' + str((i + 2) * AIE_COL - 1) + '''], aie_aim_p''' + str(p) + '''[''' + str((i + 2) * AIE_COL - 1) + '''].in[1]);
-        source(aie_aim_p''' + str(p) + '''[''' + str((i + 2) * AIE_COL - 1) + ''']) = "aie_aim_top.cc";
-        runtime<ratio>(aie_aim_p''' + str(p) + '''[''' + str((i + 2) * AIE_COL - 1) + ''']) = 1;
-        '''
-
-        # aie mid
-        for i in range(AIE_ROW - 2):
-            for j in range(AIE_COL - 2):
+        if AIE_ROW > 1:
+            
+            # aie top
+            for i in range(AIE_COL - 1):
                 code += '''
-        aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL + j + 1) + '''] = kernel::create(aie_aim_mid);
-        connect<window<AIE_H * 4> >(p_''' + str(p) + '''_in0[''' + str((i + 1) * AIE_COL + j + 1) + '''], aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL + j + 1) + '''].in[0]);
-        connect<window<AIE_W * 4 + AIE_H * 4> >(p_''' + str(p) + '''_in1[''' + str((i + 1) * AIE_COL + j + 1) + '''], aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL + j + 1) + '''].in[1]);
-        source(aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL + j + 1) + ''']) = "aie_aim_mid.cc";
-        runtime<ratio>(aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL + j + 1) + ''']) = 1;
-        '''
+            aie_aim_p''' + str(p) + '''[''' + str(i + 1) + '''] = kernel::create(aie_aim_top);
+            connect<window<AIE_H * 4> >(p_''' + str(p) + '''_in0[''' + str(i + 1) + '''], aie_aim_p''' + str(p) + '''[''' + str(i + 1) + '''].in[0]);
+            connect<window<AIE_W * 4 + AIE_H * 4> >(p_''' + str(p) + '''_in1[''' + str(i + 1) + '''], aie_aim_p''' + str(p) + '''[''' + str(i + 1) + '''].in[1]);
+            source(aie_aim_p''' + str(p) + '''[''' + str(i + 1) + ''']) = "aie_aim_top.cc";
+            runtime<ratio>(aie_aim_p''' + str(p) + '''[''' + str(i + 1) + ''']) = 1;
+            '''
 
-        # aie bottom
-        for i in range(AIE_ROW - 1):
-            code += '''
-        aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL) + '''] = kernel::create(aie_aim_bottom);
-        connect<window<AIE_H * 4> >(p_''' + str(p) + '''_in0[''' + str((i + 1) * AIE_COL) + '''], aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL) + '''].in[0]);
-        connect<window<AIE_W * 4 + AIE_H * 4> >(p_''' + str(p) + '''_in1[''' + str((i + 1) * AIE_COL) + '''], aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL) + '''].in[1]);
-        source(aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL) + ''']) = "aie_aim_bottom.cc";
-        runtime<ratio>(aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL) + ''']) = 1;
-        '''
+            for i in range(AIE_ROW - 2):
+                code += '''
+            aie_aim_p''' + str(p) + '''[''' + str((i + 2) * AIE_COL - 1) + '''] = kernel::create(aie_aim_top);
+            connect<window<AIE_H * 4> >(p_''' + str(p) + '''_in0[''' + str((i + 2) * AIE_COL - 1) + '''], aie_aim_p''' + str(p) + '''[''' + str((i + 2) * AIE_COL - 1) + '''].in[0]);
+            connect<window<AIE_W * 4 + AIE_H * 4> >(p_''' + str(p) + '''_in1[''' + str((i + 2) * AIE_COL - 1) + '''], aie_aim_p''' + str(p) + '''[''' + str((i + 2) * AIE_COL - 1) + '''].in[1]);
+            source(aie_aim_p''' + str(p) + '''[''' + str((i + 2) * AIE_COL - 1) + ''']) = "aie_aim_top.cc";
+            runtime<ratio>(aie_aim_p''' + str(p) + '''[''' + str((i + 2) * AIE_COL - 1) + ''']) = 1;
+            '''
 
-        for i in range(AIE_COL - 2):
-            code += '''
-        aie_aim_p''' + str(p) + '''[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + '''] = kernel::create(aie_aim_bottom);
-        connect<window<AIE_H * 4> >(p_''' + str(p) + '''_in0[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + '''], aie_aim_p''' + str(p) + '''[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + '''].in[0]);
-        connect<window<AIE_W * 4 + AIE_H * 4> >(p_''' + str(p) + '''_in1[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + '''], aie_aim_p''' + str(p) + '''[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + '''].in[1]);
-        source(aie_aim_p''' + str(p) + '''[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + ''']) = "aie_aim_bottom.cc";
-        runtime<ratio>(aie_aim_p''' + str(p) + '''[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + ''']) = 1;
-        
-'''
+            # aie mid
+            for i in range(AIE_ROW - 2):
+                for j in range(AIE_COL - 2):
+                    code += '''
+            aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL + j + 1) + '''] = kernel::create(aie_aim_mid);
+            connect<window<AIE_H * 4> >(p_''' + str(p) + '''_in0[''' + str((i + 1) * AIE_COL + j + 1) + '''], aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL + j + 1) + '''].in[0]);
+            connect<window<AIE_W * 4 + AIE_H * 4> >(p_''' + str(p) + '''_in1[''' + str((i + 1) * AIE_COL + j + 1) + '''], aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL + j + 1) + '''].in[1]);
+            source(aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL + j + 1) + ''']) = "aie_aim_mid.cc";
+            runtime<ratio>(aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL + j + 1) + ''']) = 1;
+            '''
+
+            # aie bottom
+            for i in range(AIE_ROW - 1):
+                code += '''
+            aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL) + '''] = kernel::create(aie_aim_bottom);
+            connect<window<AIE_H * 4> >(p_''' + str(p) + '''_in0[''' + str((i + 1) * AIE_COL) + '''], aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL) + '''].in[0]);
+            connect<window<AIE_W * 4 + AIE_H * 4> >(p_''' + str(p) + '''_in1[''' + str((i + 1) * AIE_COL) + '''], aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL) + '''].in[1]);
+            source(aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL) + ''']) = "aie_aim_bottom.cc";
+            runtime<ratio>(aie_aim_p''' + str(p) + '''[''' + str((i + 1) * AIE_COL) + ''']) = 1;
+            '''
+
+            for i in range(AIE_COL - 2):
+                code += '''
+            aie_aim_p''' + str(p) + '''[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + '''] = kernel::create(aie_aim_bottom);
+            connect<window<AIE_H * 4> >(p_''' + str(p) + '''_in0[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + '''], aie_aim_p''' + str(p) + '''[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + '''].in[0]);
+            connect<window<AIE_W * 4 + AIE_H * 4> >(p_''' + str(p) + '''_in1[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + '''], aie_aim_p''' + str(p) + '''[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + '''].in[1]);
+            source(aie_aim_p''' + str(p) + '''[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + ''']) = "aie_aim_bottom.cc";
+            runtime<ratio>(aie_aim_p''' + str(p) + '''[''' + str(i + 1 + (AIE_ROW - 1) * AIE_COL) + ''']) = 1;
+            '''
 
         # cascade
         for i in range(AIE_ROW - 1):
@@ -240,27 +241,29 @@ class simpleGraph : public graph {
         for i in range(AIE_COL - 1):
             code += "        connect<stream>(aie_aim_p" + str(p) + "[" + str((AIE_ROW - 1) * AIE_COL + i + 1) + "].out[0], p_" + str(p) + "_out[" + str(i + AIE_ROW) + "]);\n"
     
-    for p in range(PARALLELISM):
-        for i in range(AIE_COL):
-            loc = p * AIE_COL + i
-            col = int(loc / 8)
-            row = loc % 8
-            idx = 0
-            col_start = col * AIE_ROW + (0 if row % 2 == 0 else AIE_ROW - 1)
-            # code += str(col_start) + "\n"
-            if int(col_start + (1 if row % 2 == 0 else -1) * (min(i + 1, AIE_ROW) - 1)) >= 50:
-                break
-            for j in range(min(i + 1, AIE_ROW)):
-                c = int(col_start + (1 if row % 2 == 0 else -1) * idx)
-                idx += 1
-                code += "        adf::location<kernel>(aie_aim_p" + str(p) + "[" + str(i + j * (AIE_COL - 1)) + "]) = adf::tile(" + str(c) + ", " + str(row) + ");\n"
-            if int(col_start + (1 if row % 2 == 0 else -1) * (idx + AIE_ROW - i - 2)) >= 50:
-                break
-            for j in range(AIE_ROW - i - 1):
-                c = int(col_start + (1 if row % 2 == 0 else -1) * idx)
-                idx += 1
-                code += "        adf::location<kernel>(aie_aim_p" + str(p) + "[" + str((i + 2) * AIE_COL - 1 + j * (AIE_COL - 1)) + "]) = adf::tile(" + str(c) + ", " + str(row) + ");\n"
-        code += "\n"
+
+    if INPUT_BITS >= 16384:
+        for p in range(PARALLELISM):
+            for i in range(AIE_COL):
+                loc = p * AIE_COL + i
+                col = int(loc / 8)
+                row = loc % 8
+                idx = 0
+                col_start = col * AIE_ROW + (0 if row % 2 == 0 else AIE_ROW - 1)
+                # code += str(col_start) + "\n"
+                if int(col_start + (1 if row % 2 == 0 else -1) * (min(i + 1, AIE_ROW) - 1)) >= 50:
+                    break
+                for j in range(min(i + 1, AIE_ROW)):
+                    c = int(col_start + (1 if row % 2 == 0 else -1) * idx)
+                    idx += 1
+                    code += "        adf::location<kernel>(aie_aim_p" + str(p) + "[" + str(i + j * (AIE_COL - 1)) + "]) = adf::tile(" + str(c) + ", " + str(row) + ");\n"
+                if int(col_start + (1 if row % 2 == 0 else -1) * (idx + AIE_ROW - i - 2)) >= 50:
+                    break
+                for j in range(AIE_ROW - i - 1):
+                    c = int(col_start + (1 if row % 2 == 0 else -1) * idx)
+                    idx += 1
+                    code += "        adf::location<kernel>(aie_aim_p" + str(p) + "[" + str((i + 2) * AIE_COL - 1 + j * (AIE_COL - 1)) + "]) = adf::tile(" + str(c) + ", " + str(row) + ");\n"
+            code += "\n"
     code += '''    };
 };
 
