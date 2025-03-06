@@ -10,7 +10,7 @@ if not (os.path.exists(timing_rpt_path)):
 
 WNS = float(linecache.getline(timing_rpt_path, 140).split()[0])
 makefile_path = r"./Makefile"
-freq = float(linecache.getline(makefile_path, 119).split()[3])
+freq = float(linecache.getline(makefile_path, 120).split()[3])
 cycle = 1e9 / freq
 new_cycle = cycle - WNS + 0.001
 
