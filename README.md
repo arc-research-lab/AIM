@@ -9,6 +9,13 @@ Student Collaborator: Jiaqi Yin
 
 [PDF](https://peipeizhou-eecs.github.io/publication/2023iccad/2023iccad.pdf)
 
+## 🚀 Thank You for Using AIM!!
+### Your support and growing engagement inspire us to continually improve and enhance AIM
+- **Downloads since 22 Feb 2025:** <!--CLONES-->174<!--/CLONES-->
+- **Views: since 22 Feb 2025:** <!--VIEWS-->641<!--/VIEWS-->
+<img src="./assets/AIM_traffic_plot.png" width="600" />
+
+
 # AIM: Accelerating **A**rbitrary-precision **I**nteger **M**ultiplication on Heterogeneous Reconfigurable Computing Platform Versal ACAP (ICCAD'23) 
 
 ## ACM/IEEE Reference Format
