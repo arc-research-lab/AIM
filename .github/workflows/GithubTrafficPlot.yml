@@ -1,61 +1,61 @@
-name: TrafficPlot Auto Generation
+# name: TrafficPlot Auto Generation
 
-on:
-  schedule:
-    - cron: '0 0 * * *'  # Runs everyday at 00:00 UTC
-  workflow_dispatch:  # Allow manual triggering of workflows
-jobs:
-  generate_image:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write  
+# on:
+#   schedule:
+#     - cron: '0 0 * * *'  # Runs everyday at 00:00 UTC
+#   workflow_dispatch:  # Allow manual triggering of workflows
+# jobs:
+#   generate_image:
+#     runs-on: ubuntu-latest
+#     permissions:
+#       contents: write  
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3  
+#     steps:
+#       - name: Checkout repository
+#         uses: actions/checkout@v3  
 
-      - name: Check if the repo is the original one
-        run: |
-          if [[ "${{ github.repository }}" != "arc-research-lab/AIM" ]]; then
-            echo "Not the original repo, skipping workflow."
-            exit 0
-          fi
+#       - name: Check if the repo is the original one
+#         run: |
+#           if [[ "${{ github.repository }}" != "arc-research-lab/AIM" ]]; then
+#             echo "Not the original repo, skipping workflow."
+#             exit 0
+#           fi
 
-      - name: Set up Python
-        uses: actions/setup-python@v3
-        with:
-          python-version: '3.12' 
+#       - name: Set up Python
+#         uses: actions/setup-python@v3
+#         with:
+#           python-version: '3.12' 
 
-      - name: Install PyGithub version 2.6.1
-        run: pip install PyGithub==2.6.1  
+#       - name: Install PyGithub version 2.6.1
+#         run: pip install PyGithub==2.6.1  
 
-      - name: Install dependencies
-        run: |
-          pip3 install pandas matplotlib PyGithub pillow seaborn
+#       - name: Install dependencies
+#         run: |
+#           pip3 install pandas matplotlib PyGithub pillow seaborn
 
-      - name: Run image generation script
-        run: python3 utils/GithubTrafficPlot.py token:${{ secrets.GH_PAT }} utils/repo.txt assets/   # 
+#       - name: Run image generation script
+#         run: python3 utils/GithubTrafficPlot.py token:${{ secrets.GH_PAT }} utils/repo.txt assets/   # 
 
-      - name: Update total review number
-        run: |
-          # Extract the second row (Total row) from csv
-          TOTAL_ROW=$(grep "^Total" ./assets/AIM_sum.csv)
+#       - name: Update total review number
+#         run: |
+#           # Extract the second row (Total row) from csv
+#           TOTAL_ROW=$(grep "^Total" ./assets/AIM_sum.csv)
 
-          # Extract Clones and Views using awk
-          CLONES=$(echo $TOTAL_ROW | awk -F',' '{print $2}')
-          VIEWS=$(echo $TOTAL_ROW | awk -F',' '{print $3}')
+#           # Extract Clones and Views using awk
+#           CLONES=$(echo $TOTAL_ROW | awk -F',' '{print $2}')
+#           VIEWS=$(echo $TOTAL_ROW | awk -F',' '{print $3}')
 
-          sed -i "s/<!--CLONES-->.*<!--\/CLONES-->/<!--CLONES-->$CLONES<!--\/CLONES-->/" README.md
-          sed -i "s/<!--VIEWS-->.*<!--\/VIEWS-->/<!--VIEWS-->$VIEWS<!--\/VIEWS-->/" README.md
+#           sed -i "s/<!--CLONES-->.*<!--\/CLONES-->/<!--CLONES-->$CLONES<!--\/CLONES-->/" README.md
+#           sed -i "s/<!--VIEWS-->.*<!--\/VIEWS-->/<!--VIEWS-->$VIEWS<!--\/VIEWS-->/" README.md
 
-      - name: Commit and push generated image
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+#       - name: Commit and push generated image
+#         run: |
+#           git config --global user.name "github-actions[bot]"
+#           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
           
-          git add -f ./assets/*_traffic_plot.png ./assets/*.csv ./README.md
-          git commit -m "Auto-generated traffic_plot.png and plot_data.csv" || echo "No changes to commit"
-          git pull --rebase 
+#           git add -f ./assets/*_traffic_plot.png ./assets/*.csv ./README.md
+#           git commit -m "Auto-generated traffic_plot.png and plot_data.csv" || echo "No changes to commit"
+#           git pull --rebase 
           
-          git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
+#           git push https://x-access-token:${{ secrets.GH_PAT }}@github.com/${{ github.repository }}.git
